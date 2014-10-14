@@ -23,6 +23,7 @@ use XML::Simple;
 use Const;
 use GymConfig;
 
+my $USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 5_1 like Mac OS X) AppleWebKit/534.46 (KHTML, like Gecko) Version/5.1 Mobile/9B179 Safari/7534.48.3';
 
 my %WOD_DOMAINS = map { $_ => $GymConfig::GYMS->{ $_ }->{wod_domain} } keys %$GymConfig::GYMS;
 
@@ -79,28 +80,53 @@ if ( -e $cache_path ) {
 }
 
 my $ua = LWP::UserAgent->new();
+$ua->agent( $USER_AGENT );
 
 # to get a day's wod, we actually request the previous day
-my $prevday = DateTime->new( year  => $year
-	                    	,month => $month
-			    			,day   => $day
-                           );
-$prevday->add( days => -1 );
-my $prevday_str = sprintf( "%04d/%02d/%02d", $prevday->year, $prevday->month, $prevday->day );
+#my $prevday = DateTime->new( year  => $year
+#	                	,month => $month
+#			    			,day   => $day
+#                           );
+#$prevday->add( days => -1 );
+#my $prevday_str = sprintf( "%04d/%02d/%02d", $prevday->year, $prevday->month, $prevday->day );
 
+my $day = DateTime->new( year => $year
+                            ,month => $month
+                            ,day => $day
+                           );
+my $day_str = sprintf("%04d/%02d/%02d", $day->year, $day->month, $day->day );
+my $day_yyyymmdd_str = sprintf("%02d%02d%02d", $day->year % 100, $day->month, $day->day );
 
 my ( $wod, $by_date_wods );
 if ( $gym_id eq 'CROSSFITNYC' ) {
 
-	my $url = "http://${domain}/${prevday_str}/feed";
+        my %dows = ( 1 => 'monday'
+                    ,2 => 'tuesday'
+                    ,3 => 'wednesday'
+                    ,4 => 'thursday'
+                    ,5 => 'friday'
+                    ,6 => 'saturday'
+                    ,7 => 'sunday'
+                   );
+  
+        my $dow = $dows{ $day->day_of_week() };
 
-	my $req = HTTP::Request->new(GET => $url);
-	my $res = $ua->request($req);
-	if ( $res->is_success ) {
-		$wod = parse_crossfitnyc($res->content);
-	} else {
-	    die "COULD NOT FETCH WOD FOR $gym_id!: " . $res->status_line . "\n";
-	}
+	my $url_base = "http://${domain}/${day_str}/${dow}-${day_yyyymmdd_str}-";
+
+        $wod = '';
+        foreach my $type ( 'Beginner', 'Experienced', 'Competition' ) {
+
+            my $url = $url_base . lc($type);
+
+   	    my $req = HTTP::Request->new(GET => $url);
+	    my $res = $ua->request($req);
+	    if ( $res->is_success ) {
+                $wod .= "<hr>" if ( $wod );
+		$wod .= "<big><b>$type:</big></b><br><br>" . parse_crossfitnyc($res->content);
+	    } else {
+	        die "COULD NOT FETCH WOD FOR $gym_id!: " . $res->status_line . "\n";
+	    }
+        }
 
 } elsif ( $gym_id eq 'CFG' ) {
 
@@ -217,6 +243,22 @@ if ( $by_date_wods and %$by_date_wods ) {
 }
 
 sub parse_crossfitnyc {
+    my ( $raw ) = @_;
+
+    $raw =~ s/\n//g;
+
+    $raw =~ m#<section class\="entry\-content clearfix" itemprop\="articleBody">\s*(.+?)</section>#;
+    my $section = $1;
+
+    $section =~ s|<p><em>Here\&\#8217\;s (.*?)</p>||;
+
+    return $section;
+}
+
+
+=pod 
+
+sub parse_crossfitnyc {
 	my ( $raw ) = @_;
 
     my $content = XML::Simple::XMLin( $raw, force_array => 1 );
@@ -240,6 +282,8 @@ sub parse_crossfitnyc {
 	 	}
 	}
 }
+
+=cut 
 
 sub parse_crossfitlic {
 	my ( $raw, $search ) = @_;
